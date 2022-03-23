@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -84,6 +86,13 @@ func scraper(page string) data {
 
 		//cuenta el numero de palabras que hay en la pagina en las etiquetas <p>
 		words := wordCount(pharagraph)
+
+		//parrafo a sh256
+		sha := sha1.New()
+		sha.Write([]byte(pharagraph))
+
+		results.Sha = hex.EncodeToString(sha.Sum(nil))
+
 		results.Couting_words = words
 		results.Couting_links = linkcount
 	})
