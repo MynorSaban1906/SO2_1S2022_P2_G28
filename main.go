@@ -1,23 +1,41 @@
 package main
 
+// A simple example that shows how to send activity to Bubble Tea in real-time
+// through a channel.29 Windows PowerShell
 import (
-	//"crypto/sha1"
-	//"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	//"regexp"
+	"strconv"
 	"strings"
-	"github.com/gocolly/colly"
 	"sync"
 	"time"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"strconv"
+	"github.com/gocolly/colly"
 )
 
-//structura de json
+// variables globales
+var page = ""
+var monkey = 0
+var wait = 0
+var Nr = 0
+var nFile = ""
+var temporal = ""
+var temporal2 responseMsg
+var temporal3 data
+
+type responseMsg struct {
+	indice   int
+	url      string
+	estado   string
+	palabras int
+	enlaces  int
+	cola     int
+}
+
 type data struct {
 	Origin        string `json:"origin"`
 	Couting_words int    `json:"couting_words"`
@@ -27,6 +45,146 @@ type data struct {
 	Monkey        string `json:"monkey"`
 }
 
+type trabajito struct {
+	Url         string
+	Busqueda    string
+	Referencias int
+}
+
+type cache struct {
+	mu    sync.RWMutex
+	lista map[string]string
+}
+
+var colita = &cache{lista: make(map[string]string)}
+
+func agregar(k string, v string) {
+	if len(colita.lista) < wait {
+		colita.mu.Lock()
+		colita.lista[k] = v
+		colita.mu.Unlock()
+	}
+}
+
+func quitar(k string) {
+	colita.mu.Lock()
+	delete(colita.lista, k)
+	colita.mu.Unlock()
+}
+
+func leer() string {
+	colita.mu.Lock()
+
+	str := ""
+	for k, v := range colita.lista {
+		str += fmt.Sprintf("%s -> %s \n", k, v)
+	}
+	colita.mu.Unlock()
+	return str
+
+}
+
+func listenForActivity(sub chan responseMsg) tea.Cmd {
+
+	return func() tea.Msg {
+		jobs := make(chan trabajito, 100)
+		results := make(chan trabajito, 100)
+
+		for i := 0; i <= monkey; i++ {
+			go mono(jobs, results, sub, i)
+		}
+		//go mono(jobs, results, sub, 0)
+		//go mono(jobs, results, sub, 1)
+		//go mono(jobs, results, sub, 2)
+
+		jobs <- trabajito{"https://es.wikipedia.org/wiki/chuck Norris", "Chuck", Nr}
+		for r := range results {
+			x := r
+			// fnt.Println(x.Busqueda)-12.01.22 pdt
+			time.Sleep(time.Duration(1) * time.Second)
+			quitar(x.Busqueda)
+			jobs <- x
+		}
+		return nil
+
+	}
+}
+
+func waitForActivity(sub chan responseMsg) tea.Cmd {
+	return func() tea.Msg {
+		return responseMsg(<-sub)
+	}
+}
+
+func mono(jobs <-chan trabajito, results chan<- trabajito, sub chan responseMsg, indice int) {
+
+	for j := range jobs {
+		Url := j.Url
+		Nr := j.Referencias
+
+		conteo_palabras := 0
+		var enlaces []string
+		var nombres_enlaces []string
+
+		sub <- responseMsg{indice, Url, "trabajanding", 0, 0, -1}
+
+		c := colly.NewCollector(colly.Async(false))
+		c.OnRequest(func(r *colly.Request) {})
+
+		c.OnHTML("div#mw-content-text p", func(e *colly.HTMLElement) {
+			conteo_palabras += len(strings.Split(e.Text, " "))
+			//fmt.Println("---------------------------------------------")
+			//temporal = temporal + strconv.Itoa(conteo_palabras) + "\n"
+
+			sub <- responseMsg{indice, Url, "trabajanding", conteo_palabras, len(enlaces), -1}
+			temporal2.indice = indice
+			temporal2.enlaces = len(enlaces)
+			temporal2.palabras = conteo_palabras
+			temporal2.url = Url
+
+			temporal3.Origin = strconv.Itoa(indice)
+			temporal3.Couting_links = len(enlaces)
+			temporal3.Couting_words = conteo_palabras
+			temporal3.Url = Url
+			time.Sleep(500)
+		})
+
+		c.OnHTML("div#mw-content-text p a", func(e *colly.HTMLElement) {
+			enlaces = append(enlaces, e.Request.AbsoluteURL(e.Attr("href")))
+			nombres_enlaces = append(enlaces, e.Text)
+			sub <- responseMsg{indice, Url, "trabajanding", conteo_palabras, len(enlaces), -1}
+			temporal2.indice = indice
+			temporal2.enlaces = len(enlaces)
+			temporal2.palabras = conteo_palabras
+			temporal2.url = Url
+
+			temporal3.Origin = strconv.Itoa(indice)
+			temporal3.Couting_links = len(enlaces)
+			temporal3.Couting_words = conteo_palabras
+			temporal3.Url = Url
+		})
+
+		c.OnScraped(func(e *colly.Response) {
+			sub <- responseMsg{indice, Url, "descansanding", conteo_palabras, len(enlaces), -1}
+			for i := 0; i < Nr; i++ {
+				if len(enlaces) > i {
+					aux := enlaces[i]
+					nombre := nombres_enlaces[i]
+					if len(results) < Nr {
+						agregar(nombre, aux)
+						results <- trabajito{aux, nombre, Nr - 1}
+					}
+				}
+			}
+			time.Sleep(time.Duration(conteo_palabras/500) * time.Second)
+		})
+		c.Visit(Url)
+		//fmt.Println(" ")
+		//fmt.Println("---------------")
+		//fmt.Println(temporal)
+	}
+
+}
 
 type model struct {
 	sub      chan responseMsg
@@ -41,237 +199,11 @@ type model struct {
 	quitting bool
 }
 
-//structura que maneja los links 
-type Trabajo_mono struct {
-	url string 
-	busqueda string 
-	refrerencias int 
-	tam_cola int 
-}
-
-type Cache_Urls struct {
-	mu    sync.RWMutex
-	lista map[string]string
-
-}
-
-
-type responseMsg struct {
-	indice   int
-	url      string
-	estado   string
-	palabras int
-	enlaces  int
-	cola     int
-}
-
-var Cola_espera = &Cache_Urls{lista: make(map[string]string)}
-
-
-func agregar_accion(Pos string, Valor string){
-	if len(Cola_espera.lista) < wait {
-		Cola_espera.mu.Lock()
-		Cola_espera.lista[Pos] = Valor
-		Cola_espera.mu.Unlock()
-	}
-
-}
-
-func quitar_accion(valor string) {
-	Cola_espera.mu.Lock()
-	delete(Cola_espera.lista, valor)
-	Cola_espera.mu.Unlock()
-}
-
-func leer_referencia() string {
-	Cola_espera.mu.Lock()
-	str := ""
-	for k, v := range Cola_espera.lista {
-		str += fmt.Sprintf("%s -> %s \n", k, v)
-	}
-	Cola_espera.mu.Unlock()
-	return str
-
-}
-
-
-
-
-// variables globales
-var page = ""
-var monkey = 0
-var wait = 0
-var Nr = 0
-var nFile = ""
-var Tam_Cola = 0
-var resultados data
-var script = "{"
-
-
-func main() {
-	// pagina de pruebas  https://es.wikipedia.org/wiki/Red_de_computadoras
-
-	fmt.Println("---------------------------------------------")
-	fmt.Print("Cantidad de monos buscadores : ")
-	fmt.Scan(&monkey)
-	fmt.Print("Tamaño de la cola de espera : ")
-	fmt.Scan(&wait)
-	fmt.Print("numero de Referencias : ")
-	fmt.Scan(&Nr)
-	fmt.Print("URL de la Pagina : ")
-	fmt.Scan(&page)
-	fmt.Print("Nombre del archivo : ")
-	fmt.Scan(&nFile)
-	fmt.Println("---------------------------------------------")
-
-
-	p := tea.NewProgram(model{
-		sub:      make(chan responseMsg),
-		monos:    []string{"", "", "","", "","","", "","","", "","","","","","","",""},
-		urls:     []string{"", "", "","", "", "","", "", "","", "", "","", "", "","", "", ""},
-		estados:  []string{"", "", "","", "", "","", "", "","", "", "","", "", "","", "", ""},
-		palabras: []int{0, 0, 0,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0},
-		enlaces:  []int{0, 0, 0,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0},
-
-		spinner: spinner.New(),
-	})
-
-	if p.Start() != nil {
-		fmt.Println("could not start program")
-		os.Exit(1)
-	}
-
-	
-	//convierte el resultado en bytes
-	fmt.Println(resultados)
-
-	b, _ := json.MarshalIndent(resultados, "", "    ")
-	fmt.Printf("%s", b)
-	//se crea el archivo donde se guarda todo
-	file, _ := os.Create(nFile + ".json")
-
-	defer file.Close()
-	//se escribe resultados
-	file.Write(b)
-
-}
-
-
-//-------------------------
-func Accion_Mono(sub chan responseMsg) tea.Cmd {
-
-
-	return func() tea.Msg {
-	jobs := make(chan Trabajo_mono, 100)
-	results := make(chan Trabajo_mono, 100)
-
-
-	for i := 0; i <= monkey; i++ {
-		go mono(jobs, results, sub, i)	
-
-	}
-	
-
-	jobs <- Trabajo_mono{page, "Chuck", Nr, wait}
-	for r := range results {
-		x := r
-		// fnt.Println(x.Busqueda)-12.01.22 pdt
-		time.Sleep(time.Duration(1) * time.Second)
-		quitar_accion(x.busqueda)
-		jobs <- x
-	}
-	return nil
-	}
-
-}
-
-
-func Espera_Mono(sub chan responseMsg) tea.Cmd{
-	return func() tea.Msg {
-		return responseMsg(<-sub)
-	}
-	
-}
-
-
-
-func mono(jobs chan Trabajo_mono, results chan Trabajo_mono, sub chan responseMsg, indice int) data {
-	
-	for j := range jobs {
-		Url := j.url
-		Nr := j.refrerencias
-
-		conteo_palabras := 0
-		var enlaces []string
-		var nombres_enlaces []string
-
-		sub <- responseMsg{indice, Url, "Trabajando", 0, 0, -1}
-
-		c := colly.NewCollector(colly.Async(false))
-		c.OnRequest(func(r *colly.Request) {})
-
-		c.OnHTML("div#mw-content-text p", func(e *colly.HTMLElement) {
-			conteo_palabras += len(strings.Split(e.Text, " "))
-			sub <- responseMsg{indice, Url, "Trabajando", conteo_palabras, len(enlaces), -1}
-
-			resultados.Couting_links = len(enlaces)
-			resultados.Url = Url
-			resultados.Monkey = "Mono_" + strconv.Itoa(indice)
-			resultados.Couting_words =  conteo_palabras
-			
-
-			time.Sleep(500)
-		})
-
-		c.OnHTML("div#mw-content-text p a", func(e *colly.HTMLElement) {
-			enlaces = append(enlaces, e.Request.AbsoluteURL(e.Attr("href")))
-			nombres_enlaces = append(enlaces, e.Text)
-			sub <- responseMsg{indice, Url, "Trabajando", conteo_palabras, len(enlaces), -1}
-			
-			resultados.Couting_links = len(enlaces)
-			resultados.Url = Url
-			resultados.Monkey = "Mono_" + strconv.Itoa(indice)
-			resultados.Couting_words =  conteo_palabras
-
-		})
-
-		c.OnScraped(func(e *colly.Response) {
-			sub <- responseMsg{indice, Url, "Desacansando", conteo_palabras, len(enlaces), -1}
-			for i := 0; i < Nr; i++ {
-				if len(enlaces) > i {
-					aux := enlaces[i]
-					nombre := nombres_enlaces[i]
-					if len(results) < Nr {
-						agregar_accion(nombre, aux)
-						results <- Trabajo_mono{aux, nombre, Nr - 1, wait}
-						
-						resultados.Couting_links = len(enlaces)
-						resultados.Url = Url
-						resultados.Monkey = "Mono_" + strconv.Itoa(indice)
-						resultados.Couting_words =  conteo_palabras
-			
-					}
-				}
-			}
-			time.Sleep(time.Duration(conteo_palabras/500) * time.Second)
-		})
-
-		//sha := sha1.New()
-		//sha.Write([]byte(pharagraph))
-
-
-		c.Visit(Url)
-		return resultados
-	}	
-	return resultados
-}
-
-
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		spinner.Tick,
-		Accion_Mono(m.sub),
-		Espera_Mono(m.sub),
+		listenForActivity(m.sub),
+		waitForActivity(m.sub),
 	)
 }
 
@@ -288,10 +220,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.palabras[respuesta.indice] = respuesta.palabras
 			m.enlaces[respuesta.indice] = respuesta.enlaces
 			m.estados[respuesta.indice] = respuesta.estado
-			m.links = leer_referencia()
+			m.links = leer()
 		}
 
-		return m, Espera_Mono(m.sub) // wait for nest envent
+		return m, waitForActivity(m.sub) // wait for nest envent
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -319,6 +251,23 @@ func (m model) View() string {
 
 	s += fmt.Sprintf(" ---- cola de trabajo   ---")
 	s += fmt.Sprintf("\n\n %s ", m.links)
+
+	//s += fmt.Sprintf(" ---------------------------------------------------\n")
+	//s += fmt.Sprintf("%+v", temporal2)
+
+	//convierte el resultado en bytes
+	b, _ := json.MarshalIndent(temporal3, "", "    ")
+	fmt.Printf("%s", b)
+	temporal = temporal + string(b)
+	c := []byte(temporal)
+	//se crea el archivo donde se guarda todo
+	file, _ := os.Create(nFile + ".json")
+
+	defer file.Close()
+
+	//se escribe resultados
+	file.Write(c)
+
 	s += fmt.Sprintf("\n\n presione para salir ")
 
 	if m.quitting {
@@ -328,60 +277,41 @@ func (m model) View() string {
 
 }
 
+func main() {
+	fmt.Println("---------------------------------------------")
+	fmt.Print("Cantidad de monos buscadores : ")
+	fmt.Scan(&monkey)
+	fmt.Print("Tamaño de la cola de espera : ")
+	fmt.Scan(&wait)
+	fmt.Print("numero de Referencias : ")
+	fmt.Scan(&Nr)
+	fmt.Print("URL de la Pagina : ")
+	fmt.Scan(&page)
+	fmt.Print("Nombre del archivo : ")
+	fmt.Scan(&nFile)
+	fmt.Println("---------------------------------------------")
+	//var prueba [2000]string
 
-/*
-///------------------
-func scraper(page string) data {
-	//declara la estructura data que contendra los datos de la pagina visitada
-	var results data
-	linkcount := 0
-	c := colly.NewCollector()
-	pharagraph := ""
-	c.OnHTML("div.mw-parser-output", func(first *colly.HTMLElement) {
-		//ciclo para obtener todos los parrafos que estan en las secciones
-		first.ForEach("p", func(i int, second *colly.HTMLElement) {
-			//ciclo para obeter los links
-			second.ForEach("a[href]", func(i int, third *colly.HTMLElement) {
-				link := third.Attr("href")
+	//fmt.Println(monkey)
+	//for i := 0; i < monkey; i++ {
+	//	fmt.Println(i)
 
-				// se quita los links que inician con #
-				if !strings.ContainsAny(link, "#") {
-					linkcount++
-					//obtiene los links para hacer las demas busquedas
-					fmt.Printf("Link: %s -> %s\n", third.Text, link)
-				}
-			})
+	//	prueba[i] = "id" + strconv.Itoa(i)
+	//}
 
-			//junta los parrafos de todas las secciones
-			pharagraph += second.Text
-		})
+	p := tea.NewProgram(model{
+		sub:      make(chan responseMsg),
+		monos:    []string{"id_1", "id_2", "id_3", "id_4", "id_5", "id_6", "id_7", "id_8", "id_9", "id_10", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_", "id_"},
+		urls:     []string{"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""},
+		estados:  []string{"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""},
+		palabras: []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		enlaces:  []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 
-		//cuenta el numero de palabras que hay en la pagina en las etiquetas <p>
-		words := wordCount(pharagraph)
-
-		//parrafo a sh256
-		sha := sha1.New()
-		sha.Write([]byte(pharagraph))
-
-		results.Sha = hex.EncodeToString(sha.Sum(nil))
-
-		results.Couting_words = words
-		results.Couting_links = linkcount
+		spinner: spinner.New(),
 	})
 
-	results.Url = Url
-	c.Visit(page)
-
-	return results
-
+	if p.Start() != nil {
+		fmt.Println("could not start program")
+		os.Exit(1)
+	}
 }
-
-func wordCount(value string) int {
-	// Match no contando espacios solo caracteres juntos
-	re := regexp.MustCompile(`[\S]+`)
-
-	// busca todos los que hacen march y retorna el valor
-	results := re.FindAllString(value, -1)
-	return len(results)
-}
-*/
